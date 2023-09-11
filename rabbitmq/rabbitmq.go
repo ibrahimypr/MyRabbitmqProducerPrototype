@@ -23,21 +23,35 @@ func InitalizeRabbitMQ() *RabbitMQ {
 }
 
 func NewRabbitServer() (*RabbitMQ, error) {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	if err != nil {
-		return nil, err
-	}
+    var conn *amqp.Connection
+    var err error
 
-	ch, err := conn.Channel()
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-	return &RabbitMQ{
-		Connection: conn,
-		Channel: ch,
-		Queues: make(map[string]amqp.Queue),
-	}, nil
+    for { 
+        conn, err = amqp.Dial("amqp://guest:guest@localhost:5672/")
+        if err == nil {
+            break
+        }
+		log.Printf("error while connecting rabbitmq server, will try again after 4 seconds\n")
+		log.Printf("%v", err)
+        time.Sleep(4 * time.Second)
+    }
+
+	/*
+    if err != nil {
+        return nil, err
+    }
+	*/
+
+    ch, err := conn.Channel()
+    if err != nil {
+        conn.Close()
+        return nil, err
+    }
+    return &RabbitMQ{
+        Connection: conn,
+        Channel: ch,
+        Queues: make(map[string]amqp.Queue),
+    }, nil
 }
 
 func (r *RabbitMQ) DeclareQueue(name string) (amqp.Queue, error) {
@@ -81,14 +95,23 @@ func (r *RabbitMQ) PrepareMessage(ctx context.Context, queueName, body string) e
 }
 
 
-
 func SendMessage(rmq *RabbitMQ, queueName, body string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8 * time.Second)
-	defer cancel()
+    ctx, cancel := context.WithTimeout(context.Background(), 8 * time.Second)
+    defer cancel()
 
-	err := rmq.PrepareMessage(ctx, queueName, body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Sent %s to %s\n", body, queueName)
+    if rmq.Connection.IsClosed() { 
+        newRmq, err := NewRabbitServer()
+        if err != nil {
+            log.Fatal(err)
+            return
+        }
+        rmq = newRmq
+    }
+
+    err := rmq.PrepareMessage(ctx, queueName, body)
+    if err != nil {
+        log.Fatal(err)
+        return
+    }
+    log.Printf("Sent %s to %s\n", body, queueName)
 }
